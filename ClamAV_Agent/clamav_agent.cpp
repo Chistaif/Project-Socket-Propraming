@@ -3,13 +3,39 @@
 #include <ws2tcpip.h>
 #include <iostream>
 #include <sstream>
-
+#include <atomic>
+#include <csignal>
 #include "scanwithclamav.h"
 
 #define DEFAULT_PORT "3310"
 #define DEFAULT_IP "127.0.0.1"
 
 #pragma comment(lib, "Ws2_32.lib")
+
+// Biến global để điều khiển việc chạy server
+std::atomic<bool> serverRunning(true);
+SOCKET gListenSocket = INVALID_SOCKET;
+
+// Bắt sự kiện Ctrl+C hoặc đóng console
+BOOL WINAPI ConsoleHandler(DWORD signal)
+{
+    if(signal == CTRL_C_EVENT || signal == CTRL_BREAK_EVENT || signal == CTRL_CLOSE_EVENT)
+    {
+        std::cout << "\n[INFO] Stopping server...\n";
+        serverRunning = false;
+
+        // Đóng socket listen để unblock accept()
+        if(gListenSocket != INVALID_SOCKET)
+        {
+            closesocket(gListenSocket);
+            gListenSocket = INVALID_SOCKET;
+        }
+
+        WSACleanup();
+        return TRUE; // Đã xử lý
+    }
+    return FALSE;
+}
 
 std::string recvLine(SOCKET sock)
 {   
@@ -26,20 +52,23 @@ std::string recvLine(SOCKET sock)
 
 int main()
 {
+    // Đăng ký handler Ctrl+C
+    if (!SetConsoleCtrlHandler(ConsoleHandler, TRUE)) {
+        std::cerr << "[ERROR] Could not set control handler\n";
+        return 1;
+    }
+
     // khoi tao winsock version 2.2
     int error;
     WSADATA wsadata;
     error = WSAStartup(MAKEWORD(2, 2), &wsadata);
     if (error != 0)
     {
-        std::cerr << "WSAStartup() Failed: " << error << std::endl;
+        std::cerr << "[ERROR] WSAStartup() Failed: " << error << std::endl;
         return 1;
     }
-    else
-    {
-        std::cout << "The WinSock dll found!\n"
-                  << "The status: " << wsadata.szSystemStatus << std::endl;
-    }
+    std::cout << "[INFO] Winsock initialized. Status: " << wsadata.szSystemStatus << std::endl;
+
 
     // luu dia chi ip va port vao result
     addrinfo hints, *result = NULL;
@@ -56,74 +85,71 @@ int main()
     error = getaddrinfo(IP.c_str(), PORT.c_str(), &hints, &result);
     if (error != 0)
     {
-        std::cerr << "getaddrinfor() Failed: " << error << std::endl;
+        std::cerr << "[ERROR] getaddrinfor() Failed: " << error << std::endl;
         WSACleanup();
         return 1;
     }
-    else
-    {
-        std::cout << "getaddrinfor() if OK!\n";
-    }
+    std::cout << "[INFO] getaddrinfor() if OK!\n";
+    
 
     // tao socket lang nghe
-    SOCKET listenSocket = INVALID_SOCKET;
-    listenSocket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
-    if (listenSocket == INVALID_SOCKET)
+    gListenSocket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+    if (gListenSocket == INVALID_SOCKET)
     {
-        std::cerr << "socket() Failed: " << WSAGetLastError() << std::endl;
+        std::cerr << "[ERROR] socket() Failed: " << WSAGetLastError() << std::endl;
         freeaddrinfo(result);
         WSACleanup();
         return 1;
     }
-    else
-    {
-        std::cout << "socket() is OK!\n";
-    }
+    std::cout << "[INFO] socket() OK\n";
 
     // rang buoc voi socket lang nghe
-    error = bind(listenSocket, result->ai_addr, (int)result->ai_addrlen);
+    error = bind(gListenSocket, result->ai_addr, (int)result->ai_addrlen);
+    freeaddrinfo(result);
     if (error == SOCKET_ERROR)
     {
-        std::cerr << "bind() Failed: " << error << std::endl;
-        freeaddrinfo(result);
-        closesocket(listenSocket);
+        std::cerr << "[ERROR] bind() Failed: " << error << std::endl;
+        closesocket(gListenSocket);
         WSACleanup();
         return 1;
     }
-    else
-    {
-        std::cout << "bind() is OK!\n";
-        freeaddrinfo(result);
-    }
+    std::cout << "[INFO] bind() OK\n";
 
     // lang nghe yeu cau dc gui den
-    error = listen(listenSocket, SOMAXCONN);
+    error = listen(gListenSocket, SOMAXCONN);
     if (error == SOCKET_ERROR)
     {
-        std::cerr << "listen() Failed: " << error << std::endl;
-        closesocket(listenSocket);
+        std::cerr << "[ERROR] listen() Failed: " << error << std::endl;
+        closesocket(gListenSocket);
         WSACleanup();
         return 1;
     }
-    else
-    {
-        std::cout << "listen() is OK!\n";
-    }
+    std::cout << "[INFO] listen() OK\n";
 
-    while (true)
+    while(serverRunning)
     {
+        std::cout << "[INFO] Waiting for client...\n";
+
         // dong y ket noi voi client
         SOCKET clientSocket = INVALID_SOCKET;
-        clientSocket = accept(listenSocket, NULL, NULL);
+        clientSocket = accept(gListenSocket, NULL, NULL);
+        if (!serverRunning) break; // Nếu đang tắt server, thoát
+
         if (clientSocket == INVALID_SOCKET)
         {
-            std::cerr << "accept() Failed: " << WSAGetLastError() << std::endl;
-            continue;
+            int err = WSAGetLastError();
+            if(!serverRunning || err == WSAENOTSOCK || err == WSAESHUTDOWN)
+            {
+                std::cout << "[INFO] Server socket closed, stopping accept loop.\n";
+                break;
+            }
+            else
+            {
+                std::cerr << "[ERROR] accept() Failed: " << err << std::endl;
+                continue;
+            }
         }
-        else
-        {
-            std::cout << "accept() is OK!\n";
-        }
+        std::cout << "[INFO] Client connected\n";
 
         // Thiết lập timeout
         DWORD timeout = 30000;
@@ -132,7 +158,7 @@ int main()
         std::cout << "Client connected\n";
 
         bool shouldClose = false;
-        while(true)
+        while(!shouldClose && serverRunning)
         {
             //nhan yeu cau
             //khi client gui lenh put / mput thi se gui qua ClamAvAgent truoc de quet virus
@@ -140,7 +166,7 @@ int main()
             std::string header = recvLine(clientSocket); // Đảm bảo nhận đủ header từ client
             if(header.empty())
             {
-                std::cout << "Client disconnected or error reading header.\n";
+                std::cout << "[INFO] Client disconnected or error reading header.\n";
                 break;
             }
 
@@ -165,18 +191,22 @@ int main()
             //gửi kết quả về client
             if (send(clientSocket, result.c_str(), result.size(), 0) == SOCKET_ERROR)
             {
-                std::cerr << "send() failed: " << WSAGetLastError() << std::endl;
+                std::cerr << "[ERROR] send() failed: " << WSAGetLastError() << std::endl;
                 shouldClose = true;
                 continue;
             }
         }
 
         closesocket(clientSocket);
-        std::cout << "Connection closing ...\n";
+        std::cout << "[INFO] Client connection closed.\n";
     }
 
-    closesocket(listenSocket);
+    if(gListenSocket != INVALID_SOCKET)
+    {
+        closesocket(gListenSocket);
+    }
     WSACleanup();
+    std::cout << "[INFO] Server stopped cleanly.\n";
 
     return 0;
 }

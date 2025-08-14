@@ -9,7 +9,7 @@ Project mô phỏng một hệ thống truyền file an toàn, trong đó mọi 
 - ✅ Một **ClamAVAgent server** dùng để nhận file và quét virus.
 - ✅ Một **FTP server bên ngoài** (ví dụ: FileZilla Server) để lưu trữ các file an toàn.
 
-Tất cả quá trình truyền file và giao tiếp lệnh được xây dựng bằng **lập trình Winsock C++**, không dùng lệnh hệ thống (trừ `clamscan`).
+Tất cả quá trình truyền file và giao tiếp lệnh được xây dựng bằng **lập trình Winsock C++**, không dùng lệnh hệ thống (trừ `clamdscan`).
 
 ---
 
@@ -17,19 +17,18 @@ Tất cả quá trình truyền file và giao tiếp lệnh được xây dựng
 
 ```
 .
-├───final
-│   ├───ClamAV
-│   │       clamav_agent.cpp
-│   │       scanwithclamav.h
-│   │       scanwithclamav.cpp
-│   │       
-│   └───FTP client
-│           FtpClient.h
-│           FtpClient.cpp
-│           ftp_client.cpp
-│           
-├───README.md
-└───REPORT.pdf
+│   README.md
+│   REPORT.pdf
+│
+├───ClamAV_Agent
+│       clamav_agent.cpp
+│       scanwithclamav.cpp
+│       scanwithclamav.h
+│
+└───FTP_Client
+        FtpClient.cpp
+        FtpClient.h
+        ftp_client.cpp
 ```
 
 ---
@@ -39,7 +38,7 @@ Tất cả quá trình truyền file và giao tiếp lệnh được xây dựng
 ### 1. 🧪 Cài đặt ClamAV (Chi tiết các bước xem ở bên dưới)
 
 - Tải ClamAV từ: [https://www.clamav.net/downloads](https://www.clamav.net/downloads)
-- Thêm `clamscan` vào biến môi trường PATH.
+- Thêm `clamdscan` vào biến môi trường PATH.
 - Kiểm tra:
   ```bash
   clamscan --version
@@ -72,8 +71,11 @@ g++ -std=c++17 -o ftp_client ftp_client.cpp FtpClient.cpp -lws2_32
 
 ## ▶️ Chạy chương trình
 
-### Bước 1: Chạy ClamAV Agent trong terminal và nhập IP, PORT hiện tại
+### Bước 1: Chạy clamd + ClamAV Agent trong terminal và nhập IP, PORT hiện tại
 
+```bash
+./clamd
+```
 ```bash
 ./clamav_agent
 ```
@@ -118,96 +120,156 @@ g++ -std=c++17 -o ftp_client ftp_client.cpp FtpClient.cpp -lws2_32
 ## 📸 Ví dụ đầu ra
 
 ```
-ftp> mkdir hello
-257 "/hello" created successfully.
+========== FTP CLIENT MENU ==========
+-> 1. Server Connection Management
+   2. Directory/Path Operations
+   3. File Operations
+   4. Settings
+   5. Help
+   0. Exit
+===============================
+Navigate: Up/Down arrows | Select: Enter
 
-ftp> ls
--rw-rw-rw- 1 ftp ftp            3402 Jul 11 09:52 Coding_Standard.txt
-drwxrwxrwx 1 ftp ftp               0 Jul 13 09:30 hello
--rw-rw-rw- 1 ftp ftp           13336 Jul 13 09:30 hello_world.docx
-drwxrwxrwx 1 ftp ftp               0 Jul 13 09:27 test
 
-ftp> rmdir hello
-250 Directory deleted successfully
 
-ftp> cd test
+========== SUB-MENU ==========
+-> open
+   close
+   status
+Already connected to server.
+
+
+========== SUB-MENU ==========
+   open
+-> close
+   status
+Disconnected from FTP server...
+
+
+========== SUB-MENU ==========
+-> open
+   close
+   status
+========================== CONNECT TO ==========================
+ENTER SERVER'S IP ADDRESS: 127.0.0.1
+ENTER SERVER'S PORT: 21
+
+========================== LOGIN ==========================
+ENTER USER NAME: user
+ENTER PASSWORD: 123
+Welcome: 220-FileZilla Server 1.10.3
+220 Please visit https://filezilla-project.org/
+Login successful!
+
+
+========== SUB-MENU ==========
+-> ls
+   cd
+   pwd
+   mkdir
+   rmdir
+   rename
+drwxrwxrwx 1 ftp ftp               0 Aug 14 10:38 hello
+-rw-rw-rw- 1 ftp ftp               3 Aug 14 10:38 test.txt
+
+
+========== SUB-MENU ==========
+   ls
+-> cd
+   pwd
+   mkdir
+   rmdir
+   rename
+Enter directory path to change to: hello
 250 CWD command successful
 
-ftp> pwd
-257 "/test" is current directory.
 
-ftp> delete Coding_Standard.txt 
-250 File deleted successfully.
+========== SUB-MENU ==========
+   ls
+   cd
+-> pwd
+   mkdir
+   rmdir
+   rename
+Current directory:
+257 "/hello" is current directory.
 
-ftp> rename hello_world.docx hello.docx      
-350 File exists, ready for destination name.
+
+========== SUB-MENU ==========
+   ls
+   cd
+   pwd
+-> mkdir
+   rmdir
+   rename
+Enter directory name to create: hi
+257 "/hello/hi" created successfully.
+
+
+========== SUB-MENU ==========
+   ls
+   cd
+   pwd
+   mkdir
+-> rmdir
+   rename
+Enter directory name to remove: hi
+250 Directory deleted successfully.
+
+
+========== SUB-MENU ==========
+   ls
+   cd
+   pwd
+   mkdir
+   rmdir
+-> rename
+Enter current file name: hello
+Enter new file name: hi
+350 Directory exists, ready for destination name.
+
 250 File or directory renamed successfully.
 
-ftp> put Coding_Standard.txt
-ClamAV response for Coding_Standard.txt : OK
-Uploading: [=====================================================] 100.00% 
-Uploaded: Coding_Standard.txt
 
-ftp> mput new.pub test.docx 
-Prompt is now ON.
-Upload file new.pub?    [y/n]: y
-Upload file test.docx?    [y/n]: y
-ClamAV response for new.pub : OK
-Uploading: [=====================================================] 100.00%
-Uploaded: new.pub
-ClamAV response for test.docx : OK
-Uploading: [=====================================================] 100.00%
-Uploaded: test.docx
+========== SUB-MENU ==========
+-> put
+   get
+   mput
+   mget
+   delete
+   rename
+Enter local file/folder path to upload: 
+test.txt
+File sent to ClamAV Agent: test.txt
+Waiting for ClamAV response...
+ClamAV response for test.txt : OK
+Uploading: [==================================================] 100.00%
+Uploaded: test.txt
 
-ftp> get hello.docx
-Downloading: 0.35 MB received
-Downloaded: hello.docx
 
-ftp> mget get1.xlsx get2.pptx
-Prompt is now ON.
-Download file get1.xlsx?    [y/n]: y
-Download file get2.pptx?    [y/n]: y
-Downloading: 7.34 MB received
-Downloaded: get1.xlsx
-Downloading: 0.76 MB received
-Downloaded: get2.pptx 
+========== SUB-MENU ==========
+   put
+-> get
+   mput
+   mget
+   delete
+   rename
+Enter remote file/folder path to download: test.txt
+257 "/" is current directory.
 
-ftp> prompt
-Prompt is now OFF
+550 Couldn't open the directory
 
-ftp> ascii
-Switched to ASCII mode.
-200 Type set to A
+213 3
 
-ftp> binary
-Switched to BINARY mode.
-200 Type set to I
+257 "/" is current directory.
 
-ftp> close
-Disconnected from FTP server.
+150 Starting data transfer.
 
-ftp> open
-Connected successfully.
+Downloading: 0.00 MB received
+226 Operation successful
 
-ftp> status
-FTP Server: Connected
-
-ftp> passive
-Passive mode is always ON in this implementation.
-
-ftp> help
-Supported commands:
-1: ls, cd <dir>, pwd,
-mkdir <dir>, rmdir <dir>, delete <file>, rename <from> <to>,
-get <file>, put <file>, mget <file...>, mput <file...>;
-2: prompt             - Toggle interactive mode;
-3: ascii / binary     - Switch file mode;
-4: open / close       - Connect/disconnect server;
-5: status             - Show current connection status;
-6: passive            - Toggle passive mode (simulated);
-7: quit / bye         - Exit;
-
-ftp> quit
+Downloaded: test.txt
+250 CWD command successful
 ```
 
 ---
@@ -220,13 +282,13 @@ ftp> quit
 - Click chuột phải chọn giải nén file .zip vừa tải về.
 - Vào folder vừa giải nén và chuyển 2 file `clamd.conf.sample`, `freshclam.conf.sample` ra khỏi folder `conf_examples`. Đồng thời đổi tên thành `clamd.conf`, `freshclam.conf`
 - Mở lần lượt `clamd.conf`, `freshclam.conf` và xóa chữ `Example` (không được commend)
-- Tạo file `clamscan.exe` bằng lệnh sau:
+- Sau đó nhập các lệnh sau:
 ```bash
 ./freshclam.exe
 ```
 - Kiểm tra lại:
 ```bash
-clamscan --version
+clamdscan --version
 ```
 
 - Clip tham khảo: [https://www.youtube.com/watch?v=9gQXBUJbSHE&t=1s](https://www.youtube.com/watch?v=9gQXBUJbSHE&t=1s).
@@ -240,7 +302,7 @@ clamscan --version
 
 - Mở cmd ở bất kì đường dẫn nào và chạy lệnh:
 ```bash
-clamscan --version
+clamdscan --version
 ```
 - Ví dụ trả về nếu settup chuẩn
 ```bash
@@ -265,6 +327,6 @@ Làm theo hướng dẫn sau: [https://helpdesk.inet.vn/knowledgebase/huong-dan-
 
 - Project này được **xây dựng trên Windows** và cần một vài thư viện của Windows nên khi chạy trên các hệ điều hành khác thì có thể xảy ra lỗi.
 
-- Khi muốn gửi các file từ user -> server thì BẮT BUỘC các file phải ở trong cùng thư mục với file thực thi `ftp_client.exe`. Đồng thời các file được tải về từ server -> user cũng sẽ ở trong đó.
+- Khi muốn gửi các file từ user -> server thì nên ở trong cùng thư mục với file thực thi `ftp_client.exe` (hoặc nhập đầy đủ đường dẫn đến file muốn gửi đi). Đồng thời các file được tải về từ server -> user sẽ ở trong thư mục chứa `ftp_client.exe`.
 
-- *CHẮC CHẮN* rằng `FTP Server` và `clamav_agent.exe` (cũng như `clamscan.exe`) hoạt động trước khi thực thi `ftp_client.exe` để tránh lỗi không cần thiết.
+- *CHẮC CHẮN* rằng `FTP Server` và `clamav_agent.exe` (cũng như `clamdscan.exe`) hoạt động trước khi thực thi `ftp_client.exe` để tránh lỗi không cần thiết.
