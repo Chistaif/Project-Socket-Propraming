@@ -80,6 +80,7 @@ int main()
                 if (choice == 5)
                 {
                     Execute("help", ftp);
+                    system("pause");
                 }
                 else if (choice == 0)
                 {
@@ -166,6 +167,7 @@ void handleSubMenu(const vector<string> &subOptions, FtpClient &ftp)
         case 13:
         {
             Execute(subOptions[subChoice], ftp);
+            system("pause");
             break;
         }
         case 27:
@@ -403,6 +405,4 @@ void Execute(const string &cmd, FtpClient &ftp)
     }
     else
         cout << "Invalid command. Type 'help' for supported commands.\n";
-
-    system("pause");
 }
