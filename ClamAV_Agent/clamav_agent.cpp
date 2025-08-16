@@ -197,6 +197,7 @@ int main()
             }
         }
 
+        shutdown(clientSocket, SD_SEND);  // Gửi FIN để thông báo ngắt kết nối
         closesocket(clientSocket);
         std::cout << "[INFO] Client connection closed.\n";
     }
