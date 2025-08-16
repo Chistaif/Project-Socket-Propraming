@@ -3,6 +3,54 @@
 bool firstTime = true;
 string IP, PORT;
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iostream>
+using namespace std;
+
+// Hàm tìm IP LAN thật (bỏ qua 127.x.x.x, 169.254.x.x, 192.168.56.x)
+bool GetLocalLanIP(unsigned char ip[4]) {
+    char hostname[256];
+    if(gethostname(hostname, sizeof(hostname)) == SOCKET_ERROR){
+        cerr << "[ERROR] gethostname() failed: " << WSAGetLastError() << endl;
+        return false;
+    }
+
+    hostent* he = gethostbyname(hostname);
+    if(!he){
+        cerr << "[ERROR] gethostbyname() failed\n";
+        return false;
+    }
+
+    for(int i = 0; he->h_addr_list[i] != NULL; i++){
+        struct in_addr* addr_in = (struct in_addr*)he->h_addr_list[i];
+        unsigned char* cand = (unsigned char*)&addr_in->s_addr;
+
+        // Debug in tất cả IP tìm được
+        cout << "[DEBUG] Found IP: " 
+             << (int)cand[0] << "."
+             << (int)cand[1] << "."
+             << (int)cand[2] << "."
+             << (int)cand[3] << endl;
+
+        // Bỏ qua loopback
+        if(cand[0] == 127) continue;
+
+        // Bỏ qua APIPA (169.254.x.x)
+        if(cand[0] == 169 && cand[1] == 254) continue;
+
+        // Bỏ qua VirtualBox (192.168.56.x)
+        if(cand[0] == 192 && cand[1] == 168 && cand[2] == 56) continue;
+
+        // Nếu qua hết filter thì chọn IP này
+        memcpy(ip, cand, 4);
+        return true;
+    }
+
+    return false; // Không tìm thấy IP phù hợp
+}
+
+
 FtpClient::FtpClient(const string& IP, const string& PORT){
     serverIP = IP; 
     serverPORT = PORT;
@@ -92,76 +140,65 @@ SOCKET FtpClient::EnterPASVMode(string& IP, string& PORT){
     return ConnectToServer(IP.c_str(), PORT.c_str());
 }
 
-SOCKET FtpClient::EnterPORTMode(){
-    // Tạo một socket để lắng nghe kết nối từ server
+SOCKET FtpClient::EnterPORTMode() {
+    // 1. Tạo socket listen
     SOCKET listenSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if(listenSock == INVALID_SOCKET){
-        cout << "Create PORT listen socket failed.\n";
+        cerr << "[ERROR] socket() failed: " << WSAGetLastError() << endl;
         return INVALID_SOCKET;
     }
 
     sockaddr_in addr;
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = 0; // Cho hệ thống chọn port
+    addr.sin_port = htons(50000); // cố định dễ debug
+
     if(bind(listenSock, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR){
-        cout << "Bind PORT socket failed.\n";
+        cerr << "[ERROR] bind() failed: " << WSAGetLastError() << endl;
         closesocket(listenSock);
         return INVALID_SOCKET;
     }
 
-    // Lấy port được gán
-    socklen_t len = sizeof(addr);
-    getsockname(listenSock, (sockaddr*)&addr, &len);
-    int port = ntohs(addr.sin_port);
+    if(listen(listenSock, SOMAXCONN) == SOCKET_ERROR){
+        cerr << "[ERROR] listen() failed: " << WSAGetLastError() << endl;
+        closesocket(listenSock);
+        return INVALID_SOCKET;
+    }
 
-    // Lấy IP cục bộ
-    char hostname[64];
-    gethostname(hostname, sizeof(hostname));
-    hostent* he = gethostbyname(hostname);
-    unsigned char* ip = (unsigned char*)he->h_addr;
+    // 2. Lấy IP LAN thật (logic mình viết trước đó)
+    unsigned char ip[4];
+    if(!GetLocalLanIP(ip)){ 
+        cerr << "[ERROR] no LAN IP found\n";
+        closesocket(listenSock);
+        return INVALID_SOCKET;
+    }
 
-    // Tạo lệnh PORT
-    int p1 = port / 256, p2 = port % 256;
+    int p1 = 50000 / 256, p2 = 50000 % 256;
     char cmd[64];
     sprintf(cmd, "PORT %d,%d,%d,%d,%d,%d\r\n",
             ip[0], ip[1], ip[2], ip[3], p1, p2);
 
-    // Gửi lệnh PORT tới server
     string resp = SendCmd(cmd);
     if(resp.substr(0,3) != "200"){
-        cout << "Server rejected PORT.\n";
+        cerr << "[ERROR] Server rejected PORT\n";
         closesocket(listenSock);
         return INVALID_SOCKET;
     }
 
-    // Lắng nghe server kết nối lại
-    listen(listenSock, SOMAXCONN);
+    cout << "[INFO] Waiting for FTP server (Active Mode)...\n";
 
-    cout << "Waiting for server (Active Mode)...\n";
-
-    // Thiết lập timeout 10 giây cho accept()
-    fd_set readfds;
-    FD_ZERO(&readfds);
-    FD_SET(listenSock, &readfds);
-
-    struct timeval timeout;
-    timeout.tv_sec = 10;  // 10 giây
-    timeout.tv_usec = 0;
-
-    int sel = select(0, &readfds, nullptr, nullptr, &timeout);
-    if(sel > 0 && FD_ISSET(listenSock, &readfds)){
-        SOCKET dataSock = accept(listenSock, NULL, NULL);
-        closesocket(listenSock);
-        return dataSock;
-    }
-    else{
-        cout << "Timeout or error: server did not connect back (Active Mode).\n";
+    // 3. Accept kết nối từ server (giống clamav_agent accept client)
+    SOCKET dataSock = accept(listenSock, NULL, NULL);
+    if(dataSock == INVALID_SOCKET){
+        cerr << "[ERROR] accept() failed: " << WSAGetLastError() << endl;
         closesocket(listenSock);
         return INVALID_SOCKET;
     }
 
-    return INVALID_SOCKET; // Chỉ để tránh cảnh báo, không bao giờ đến đây
+    cout << "[INFO] FTP server connected back successfully\n";
+    closesocket(listenSock); // đóng listen, chỉ giữ dataSock
+
+    return dataSock;
 }
 
 vector<char> FtpClient::ReadFile(const string& fileName){
